@@ -8,10 +8,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Bundle;
+import android.util.Log;
 
 import com.dieam.reactnativepushnotification.helpers.ApplicationBadgeHelper;
 import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.LifecycleEventListener;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContext;
@@ -21,8 +23,6 @@ import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Random;
 
 public class RNPushNotification extends ReactContextBaseJavaModule implements ActivityEventListener {
@@ -44,6 +44,25 @@ public class RNPushNotification extends ReactContextBaseJavaModule implements Ac
         mJsDelivery = new RNPushNotificationJsDelivery(reactContext);
 
         registerNotificationsRegistration();
+
+        reactContext.addLifecycleEventListener(new LifecycleEventListener() {
+            @Override
+            public void onHostResume() {
+                Activity activity = getCurrentActivity();
+                if (activity != null) {
+                    Intent intent = activity.getIntent();
+                    if (intent != null) {
+                        notifyFromIntent(intent);
+                    }
+                }
+            }
+
+            @Override
+            public void onHostPause() {}
+
+            @Override
+            public void onHostDestroy() {}
+        });
     }
 
     @Override
@@ -52,19 +71,34 @@ public class RNPushNotification extends ReactContextBaseJavaModule implements Ac
     }
 
     @Override
-    public Map<String, Object> getConstants() {
-        final Map<String, Object> constants = new HashMap<>();
-
-        return constants;
+    public void onNewIntent(Intent intent) {
+        Activity activity = getCurrentActivity();
+        if (activity != null) {
+            activity.setIntent(intent);
+        }
     }
 
-    public void onNewIntent(Intent intent) {
-        if (intent.hasExtra("notification")) {
-            Bundle bundle = intent.getBundleExtra("notification");
-            bundle.putBoolean("foreground", false);
-            intent.putExtra("notification", bundle);
-            mJsDelivery.notifyNotification(bundle);
+    private void notifyFromIntent(Intent intent) {
+        Bundle notificationBundle = getNotificationBundle(intent);
+
+        if (notificationBundle != null) {
+            notificationBundle.putBoolean("foreground", false);
+
+            mJsDelivery.notifyNotification(notificationBundle);
+
+            intent.removeExtra("notification");
+            intent.removeExtra("google.message_id");
         }
+    }
+
+    private Bundle getNotificationBundle(Intent intent) {
+        Bundle bundle = null;
+        if (intent.hasExtra("notification")) {
+            bundle = intent.getBundleExtra("notification");
+        } else if (intent.hasExtra("google.message_id")) {
+            bundle = intent.getExtras();
+        }
+        return bundle;
     }
 
     private void registerNotificationsRegistration() {
@@ -141,13 +175,15 @@ public class RNPushNotification extends ReactContextBaseJavaModule implements Ac
         Activity activity = getCurrentActivity();
         if (activity != null) {
             Intent intent = activity.getIntent();
-            Bundle bundle = intent.getBundleExtra("notification");
+            Bundle bundle = getNotificationBundle(intent);
+
             if (bundle != null) {
                 bundle.putBoolean("foreground", false);
                 String bundleString = mJsDelivery.convertJSON(bundle);
                 params.putString("dataJSON", bundleString);
             }
         }
+        Log.i(LOG_TAG, "getInitialNotification returns " + params);
         promise.resolve(params);
     }
 
